@@ -11,7 +11,7 @@ pipeline {
         }
         stage('Build Docker Image') {
             steps {  
-                bat 'docker build -t hiran86/travel-planning-app:%BUILD_NUMBER% .'
+                bat 'docker-compose build hiran86/travel-planning-app:%BUILD_NUMBER% .'
             }
         }
         stage('Login to Docker Hub') {
