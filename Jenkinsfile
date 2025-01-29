@@ -1,6 +1,6 @@
 pipeline {
     agent any 
-    
+
     stages { 
         stage('SCM Checkout') {
             steps {
@@ -9,11 +9,23 @@ pipeline {
                 }
             }
         }
-        stage('Build Docker Image') {
-            steps {  
-                bat 'docker-compose build hiran86/travel-planning-app:%BUILD_NUMBER% .'
+
+        stage('Build Backend Docker Image') {
+            steps {
+                dir('backend') {
+                    bat 'docker build -t hiran86/travel-planning-app-backend:%BUILD_NUMBER% -f Dockerfile .'
+                }
             }
         }
+
+        stage('Build Frontend Docker Image') {
+            steps {
+                dir('frontend') {
+                    bat 'docker build -t hiran86/travel-planning-app-frontend:%BUILD_NUMBER% -f Dockerfile .'
+                }
+            }
+        }
+
         stage('Login to Docker Hub') {
             steps {
                 withCredentials([string(credentialsId: 'docker-hub-credentials', variable: 'DOCKER_PASSWORD')]) {
@@ -23,12 +35,20 @@ pipeline {
                 }
             }
         }
-        stage('Push Image') {
+
+        stage('Push Backend Image') {
             steps {
-                bat 'docker push hiran86/travel-planning-app:%BUILD_NUMBER%'
+                bat 'docker push hiran86/travel-planning-app-backend:%BUILD_NUMBER%'
+            }
+        }
+
+        stage('Push Frontend Image') {
+            steps {
+                bat 'docker push hiran86/travel-planning-app-frontend:%BUILD_NUMBER%'
             }
         }
     }
+
     post {
         always {
             bat 'docker logout'
