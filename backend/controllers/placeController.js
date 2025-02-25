@@ -9,7 +9,7 @@ const getPlaces = asyncHandler(async (req, res) => {
   res.json(places);
 });
 
-// @desc    Fetch single place
+// @desc    Fetch single
 // @route   GET /api/places/:id
 // @access  Public
 const getPlaceById = asyncHandler(async (req, res) => {
