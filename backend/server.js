@@ -26,7 +26,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-// Body parser middleware
+
 app.use(express.json());
 app.use(cookieParser());
 
