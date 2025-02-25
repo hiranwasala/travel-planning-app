@@ -9,7 +9,7 @@ function App() {
 
   return (
     <>
-{/* this is the root app */}
+
        <AllRoutes/>
  
     </>
