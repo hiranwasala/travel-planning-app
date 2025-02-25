@@ -37,7 +37,7 @@ app.get('/', (req, res) => {
 app.use('/api/users', userRoutes);
 app.use('/api/places', placeRoutes);
 
-// Serve static images
+
 app.use('/images', express.static(path.join(__dirname, 'assets/images')));
 
 app.listen(port, () => {
