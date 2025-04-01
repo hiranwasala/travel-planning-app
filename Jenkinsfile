@@ -1,6 +1,6 @@
 pipeline {
     agent any 
-
+    
     stages { 
         stage('SCM Checkout') {
             steps {
@@ -9,23 +9,11 @@ pipeline {
                 }
             }
         }
-
-        stage('Build Backend Docker Image') {
-            steps {
-                dir('backend') {
-                    bat 'docker build -t hiran86/travel-planning-app-backend:%BUILD_NUMBER% -f Dockerfile .'
-                }
+        stage('Build Docker Image') {
+            steps {  
+                bat 'docker build -t hiran86/travel-planning-app:%BUILD_NUMBER% .'
             }
         }
-
-        stage('Build Frontend Docker Image') {
-            steps {
-                dir('frontend') {
-                    bat 'docker build -t hiran86/travel-planning-app-frontend:%BUILD_NUMBER% -f Dockerfile .'
-                }
-            }
-        }
-
         stage('Login to Docker Hub') {
             steps {
                 withCredentials([string(credentialsId: 'docker-hub-credentials', variable: 'DOCKER_PASSWORD')]) {
@@ -35,23 +23,27 @@ pipeline {
                 }
             }
         }
-
-        stage('Push Backend Image') {
+        stage('Push Image') {
             steps {
-                bat 'docker push hiran86/travel-planning-app-backend:%BUILD_NUMBER%'
+                bat 'docker push hiran86/travel-planning-app:%BUILD_NUMBER%'
             }
         }
-
-        stage('Push Frontend Image') {
+        stage('Deploy to EC2') {
             steps {
-                bat 'docker push hiran86/travel-planning-app-frontend:%BUILD_NUMBER%'
+                withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh-key', keyFileVariable: 'SSH_KEY')]) {
+                    script {
+                        bat """
+                        ansible-playbook -i inventory.ini deploy.yml --extra-vars "image_tag=%BUILD_NUMBER%"
+                        """
+                    }
+                }
             }
         }
     }
-
     post {
         always {
             bat 'docker logout'
         }
     }
 }
+
