@@ -43,7 +43,7 @@ pipeline {
                 withCredentials([sshUserPrivateKey(credentialsId: 'travel-app-key', keyFileVariable: 'SSH_KEY')]) {
                     script {
                         bat """
-                        ansible-playbook -i inventory.ini deploy.yml --extra-vars "backend_image_tag=%BUILD_NUMBER% frontend_image_tag=%BUILD_NUMBER%"
+                        ansible-playbook -i inventory.ini deploy.yml --extra-vars "backend_image_tag=%BUILD_NUMBER%,frontend_image_tag=%BUILD_NUMBER%"
                         """
                     }
                 }
