@@ -50,21 +50,30 @@ pipeline {
                     usernameVariable: 'SSH_USER'
                 )]) {
                     script {
-                        // Copy key to workspace and set permissions
-                        bat """
-                        copy %SSH_KEY% "%WORKSPACE%\\travel-app-key.pem"
-                        icacls "%WORKSPACE%\\travel-app-key.pem" /reset
-                        icacls "%WORKSPACE%\\travel-app-key.pem" /grant:r "%USERNAME%":(R)
-                        icacls "%WORKSPACE%\\travel-app-key.pem" /inheritance:r
-                        """
-                        
-                        // Run Ansible with the key
-                        bat """
-                        ansible-playbook -i inventory.ini deploy.yml \
-                          --private-key "%WORKSPACE%\\travel-app-key.pem" \
-                          -e "backend_image_tag=%BUILD_NUMBER%" \
-                          -e "frontend_image_tag=%BUILD_NUMBER%"
-                        """
+                        if (isUnix()) {
+                            // Linux agent handling
+                            sh """
+                            cp \$SSH_KEY \$WORKSPACE/travel-app-key.pem
+                            chmod 600 \$WORKSPACE/travel-app-key.pem
+                            ansible-playbook -i inventory.ini deploy.yml \
+                              --private-key \$WORKSPACE/travel-app-key.pem \
+                              -e "backend_image_tag=${env.BUILD_NUMBER}" \
+                              -e "frontend_image_tag=${env.BUILD_NUMBER}"
+                            """
+                        } else {
+                            // Windows agent handling
+                            bat """
+                            copy "%SSH_KEY%" "%WORKSPACE%\\travel-app-key.pem"
+                            icacls "%WORKSPACE%\\travel-app-key.pem" /reset
+                            icacls "%WORKSPACE%\\travel-app-key.pem" /grant:r "%USERNAME%":(R)
+                            icacls "%WORKSPACE%\\travel-app-key.pem" /inheritance:r
+                            
+                            ansible-playbook -i inventory.ini deploy.yml ^
+                              --private-key "%WORKSPACE%\\travel-app-key.pem" ^
+                              -e "backend_image_tag=%BUILD_NUMBER%" ^
+                              -e "frontend_image_tag=%BUILD_NUMBER%"
+                            """
+                        }
                     }
                 }
             }
@@ -74,8 +83,10 @@ pipeline {
     post {
         always {
             bat 'docker logout'
-            // Clean up the key file
+            // Clean up the key file (Windows only)
             bat 'if exist "%WORKSPACE%\\travel-app-key.pem" del "%WORKSPACE%\\travel-app-key.pem"'
+            // Clean up for Linux (if agent is Linux)
+            sh 'rm -f $WORKSPACE/travel-app-key.pem'
         }
     }
 }
