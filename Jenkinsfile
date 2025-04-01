@@ -30,7 +30,7 @@ pipeline {
         }
         stage('Deploy to EC2') {
             steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh-key', keyFileVariable: 'SSH_KEY')]) {
+                withCredentials([sshUserPrivateKey(credentialsId: 'travel-app-key', keyFileVariable: 'SSH_KEY')]) {
                     script {
                         bat """
                         ansible-playbook -i inventory.ini deploy.yml --extra-vars "image_tag=%BUILD_NUMBER%"
