@@ -9,9 +9,18 @@ pipeline {
                 }
             }
         }
-        stage('Build Docker Image') {
+        stage('Build Backend Docker Image') {
             steps {  
-                bat 'docker build -t hiran86/travel-planning-app:%BUILD_NUMBER% .'
+                dir('backend') {
+                    bat 'docker build -t hiran86/travel-planning-app-backend:%BUILD_NUMBER% .'
+                }
+            }
+        }
+        stage('Build Frontend Docker Image') {
+            steps {  
+                dir('frontend') {
+                    bat 'docker build -t hiran86/travel-planning-app-frontend:%BUILD_NUMBER% .'
+                }
             }
         }
         stage('Login to Docker Hub') {
@@ -23,9 +32,10 @@ pipeline {
                 }
             }
         }
-        stage('Push Image') {
+        stage('Push Images') {
             steps {
-                bat 'docker push hiran86/travel-planning-app:%BUILD_NUMBER%'
+                bat 'docker push hiran86/travel-planning-app-backend:%BUILD_NUMBER%'
+                bat 'docker push hiran86/travel-planning-app-frontend:%BUILD_NUMBER%'
             }
         }
         stage('Deploy to EC2') {
@@ -33,7 +43,7 @@ pipeline {
                 withCredentials([sshUserPrivateKey(credentialsId: 'travel-app-key', keyFileVariable: 'SSH_KEY')]) {
                     script {
                         bat """
-                        ansible-playbook -i inventory.ini deploy.yml --extra-vars "image_tag=%BUILD_NUMBER%"
+                        ansible-playbook -i inventory.ini deploy.yml --extra-vars "backend_image_tag=%BUILD_NUMBER% frontend_image_tag=%BUILD_NUMBER%"
                         """
                     }
                 }
@@ -46,4 +56,3 @@ pipeline {
         }
     }
 }
-
