@@ -1,14 +1,16 @@
 pipeline {
     agent any 
     
-    stages { 
+    stages {
         stage('SCM Checkout') {
             steps {
                 retry(3) {
-                    git branch: 'main', url: 'https://github.com/hiranwasala/travel-planning-app'
+                    git branch: 'main', 
+                    url: 'https://github.com/hiranwasala/travel-planning-app'
                 }
             }
         }
+        
         stage('Build Backend Docker Image') {
             steps {  
                 dir('backend') {
@@ -16,6 +18,7 @@ pipeline {
                 }
             }
         }
+        
         stage('Build Frontend Docker Image') {
             steps {  
                 dir('frontend') {
@@ -23,36 +26,56 @@ pipeline {
                 }
             }
         }
+        
         stage('Login to Docker Hub') {
             steps {
                 withCredentials([string(credentialsId: 'docker-hub-credentials', variable: 'DOCKER_PASSWORD')]) {
-                    script {
-                        bat "docker login -u hiran86 -p %DOCKER_PASSWORD%"
-                    }
+                    bat "docker login -u hiran86 -p %DOCKER_PASSWORD%"
                 }
             }
         }
+        
         stage('Push Images') {
             steps {
                 bat 'docker push hiran86/travel-planning-app-backend:%BUILD_NUMBER%'
                 bat 'docker push hiran86/travel-planning-app-frontend:%BUILD_NUMBER%'
             }
         }
+        
         stage('Deploy to EC2') {
             steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'travel-app-key', keyFileVariable: 'SSH_KEY')]) {
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: 'travel-app-key',
+                    keyFileVariable: 'SSH_KEY',
+                    usernameVariable: 'SSH_USER'
+                )]) {
                     script {
+                        // Copy key to workspace and set permissions
                         bat """
-                        ansible-playbook -i inventory.ini deploy.yml --extra-vars "backend_image_tag=%BUILD_NUMBER%,frontend_image_tag=%BUILD_NUMBER%"
+                        copy %SSH_KEY% "%WORKSPACE%\\travel-app-key.pem"
+                        icacls "%WORKSPACE%\\travel-app-key.pem" /reset
+                        icacls "%WORKSPACE%\\travel-app-key.pem" /grant:r "%USERNAME%":(R)
+                        icacls "%WORKSPACE%\\travel-app-key.pem" /inheritance:r
+                        """
+                        
+                        // Run Ansible with the key
+                        bat """
+                        ansible-playbook -i inventory.ini deploy.yml \
+                          --private-key "%WORKSPACE%\\travel-app-key.pem" \
+                          -e "backend_image_tag=%BUILD_NUMBER%" \
+                          -e "frontend_image_tag=%BUILD_NUMBER%"
                         """
                     }
                 }
             }
         }
     }
+    
     post {
         always {
             bat 'docker logout'
+            // Clean up the key file
+            bat 'if exist "%WORKSPACE%\\travel-app-key.pem" del "%WORKSPACE%\\travel-app-key.pem"'
         }
     }
 }
