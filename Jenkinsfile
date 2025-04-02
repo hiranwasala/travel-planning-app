@@ -8,21 +8,6 @@ pipeline {
     }
     
     stages {
-        stage('Initialize') {
-            steps {
-                bat '''
-                :: Verify Python exists or install it
-                where python || (
-                    echo "Installing Python..."
-                    choco install python -y --no-progress
-                    refreshenv
-                )
-                
-                :: Install Ansible
-                python -m pip install --user ansible
-                '''
-            }
-        }
         stage('SCM Checkout') {
             steps {
                 retry(3) {
@@ -130,18 +115,34 @@ pipeline {
             steps {
                 withCredentials([sshUserPrivateKey(
                     credentialsId: 'travel-app-key',
-                    keyFileVariable: 'SSH_KEY'
+                    keyFileVariable: 'SSH_KEY',
+                    usernameVariable: 'SSH_USER'
                 )]) {
-                    bat """
-                    :: Copy key with basic permissions
-                    copy "%SSH_KEY%" "%WORKSPACE%\\travel-app-key.pem"
-                    attrib +R "%WORKSPACE%\\travel-app-key.pem"
-                    
-                    :: Run Ansible through Python module
-                    python -m ansible.cli.playbook -i inventory.ini deploy.yml ^
-                      -e "backend_image_tag=%BUILD_NUMBER%" ^
-                      -e "frontend_image_tag=%BUILD_NUMBER%"
-                    """
+                    script {
+                        if (isUnix()) {
+                            sh """
+                            cp \$SSH_KEY \$WORKSPACE/travel-app-key.pem
+                            chmod 600 \$WORKSPACE/travel-app-key.pem
+                            ansible-playbook -i inventory.ini deploy.yml \
+                            -e "backend_image_tag=${env.BUILD_NUMBER}" \
+                            -e "frontend_image_tag=${env.BUILD_NUMBER}"
+                            """
+                        } else {
+                            bat """
+                            copy "%SSH_KEY%" "%WORKSPACE%\\travel-app-key.pem"
+                            icacls "%WORKSPACE%\\travel-app-key.pem" /grant:r "%COMPUTERNAME%\\%USERNAME%":(R) /inheritance:r
+                            
+                            :: Ensure Python and Ansible are installed
+                            where python || echo "Python is missing!" && exit /b 1
+                            where ansible-playbook || echo "Ansible is missing!" && exit /b 1
+                            
+                            :: Run Ansible
+                            ansible-playbook -i inventory.ini deploy.yml ^
+                            -e "backend_image_tag=%BUILD_NUMBER%" ^
+                            -e "frontend_image_tag=%BUILD_NUMBER%"
+                            """
+                        }
+                    }
                 }
             }
         }
