@@ -2,7 +2,6 @@ pipeline {
     agent any 
     
     environment {
-        // Define your EC2 host (or pass as parameter)
         EC2_HOST = 'ec2-54-208-57-6.compute-1.amazonaws.com'
         APP_DIR = '/opt/travel-app'
     }
@@ -26,9 +25,10 @@ pipeline {
                 
                 [web:vars]
                 ansible_python_interpreter=/usr/bin/python3
+                ansible_ssh_private_key_file=\${WORKSPACE}/travel-app-key.pem
                 """
                 
-                // Create minimal deploy.yml if not in repo
+                // Create minimal deploy.yml
                 writeFile file: 'deploy.yml', text: """
                 ---
                 - name: Deploy Travel Planning App
@@ -62,7 +62,7 @@ pipeline {
                       
                     - name: Deploy docker-compose.yml
                       copy:
-                        src: docker-compose.yml
+                        src: "\${WORKSPACE}/docker-compose.yml"
                         dest: "{{ app_dir }}/docker-compose.yml"
                       
                     - name: Start containers
@@ -71,7 +71,6 @@ pipeline {
                         --pull always
                 """
                 
-                // Verify files exist
                 script {
                     if (!fileExists('docker-compose.yml')) {
                         error("Missing docker-compose.yml in repository!")
@@ -124,19 +123,19 @@ pipeline {
                             cp \$SSH_KEY \$WORKSPACE/travel-app-key.pem
                             chmod 600 \$WORKSPACE/travel-app-key.pem
                             ansible-playbook -i inventory.ini deploy.yml \
-                              --private-key \$WORKSPACE/travel-app-key.pem \
                               -e "backend_image_tag=${env.BUILD_NUMBER}" \
                               -e "frontend_image_tag=${env.BUILD_NUMBER}"
                             """
                         } else {
                             bat """
                             copy "%SSH_KEY%" "%WORKSPACE%\\travel-app-key.pem"
-                            icacls "%WORKSPACE%\\travel-app-key.pem" /reset
-                            icacls "%WORKSPACE%\\travel-app-key.pem" /grant:r "%USERNAME%":(R)
-                            icacls "%WORKSPACE%\\travel-app-key.pem" /inheritance:r
+                            icacls "%WORKSPACE%\\travel-app-key.pem" /grant:r "%USERNAME%":(R) /inheritance:r
                             
-                            ansible-playbook -i inventory.ini deploy.yml ^
-                              --private-key "%WORKSPACE%\\travel-app-key.pem" ^
+                            :: Verify Ansible is installed
+                            python -m pip install --user ansible
+                            
+                            :: Run Ansible with module syntax
+                            python -m ansible playbook -i inventory.ini deploy.yml ^
                               -e "backend_image_tag=%BUILD_NUMBER%" ^
                               -e "frontend_image_tag=%BUILD_NUMBER%"
                             """
@@ -150,7 +149,6 @@ pipeline {
     post {
         always {
             bat 'docker logout'
-            // Cross-platform cleanup
             script {
                 if (isUnix()) {
                     sh 'rm -f $WORKSPACE/travel-app-key.pem'
