@@ -118,31 +118,26 @@ pipeline {
                     keyFileVariable: 'SSH_KEY',
                     usernameVariable: 'SSH_USER'
                 )]) {
-                    script {
-                        if (isUnix()) {
-                            sh """
-                            cp \$SSH_KEY \$WORKSPACE/travel-app-key.pem
-                            chmod 600 \$WORKSPACE/travel-app-key.pem
-                            ansible-playbook -i inventory.ini deploy.yml \
-                            -e "backend_image_tag=${env.BUILD_NUMBER}" \
-                            -e "frontend_image_tag=${env.BUILD_NUMBER}"
-                            """
-                        } else {
-                            bat """
-                            copy "%SSH_KEY%" "%WORKSPACE%\\travel-app-key.pem"
-                            icacls "%WORKSPACE%\\travel-app-key.pem" /grant:r "%COMPUTERNAME%\\%USERNAME%":(R) /inheritance:r
-                            
-                            :: Ensure Python and Ansible are installed
-                            where python || echo "Python is missing!" && exit /b 1
-                            where ansible-playbook || echo "Ansible is missing!" && exit /b 1
-                            
-                            :: Run Ansible
-                            ansible-playbook -i inventory.ini deploy.yml ^
-                            -e "backend_image_tag=%BUILD_NUMBER%" ^
-                            -e "frontend_image_tag=%BUILD_NUMBER%"
-                            """
-                        }
-                    }
+                    bat """
+                    copy "%SSH_KEY%" "%WORKSPACE%\\travel-app-key.pem"
+                    
+                    :: Verify Python exists at your specific path
+                    IF NOT EXIST "C:\\Users\\Hiran\\AppData\\Local\\Programs\\Python\\Python313\\python.exe" (
+                        echo Python not found at expected location
+                        exit /b 1
+                    )
+                    
+                    :: Verify Ansible is installed
+                    IF NOT EXIST "C:\\Users\\Hiran\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\ansible-playbook.exe" (
+                        echo Ansible not found. Installing...
+                        "C:\\Users\\Hiran\\AppData\\Local\\Programs\\Python\\Python313\\python.exe" -m pip install ansible
+                    )
+                    
+                    :: Run Ansible using full path
+                    "C:\\Users\\Hiran\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\ansible-playbook.exe" -i inventory.ini deploy.yml ^
+                    -e "backend_image_tag=%BUILD_NUMBER%" ^
+                    -e "frontend_image_tag=%BUILD_NUMBER%"
+                    """
                 }
             }
         }
