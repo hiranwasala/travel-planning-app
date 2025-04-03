@@ -1,21 +1,18 @@
 ---
-- name: Deploy Travel Planning Application (MERN Stack)
-  hosts: web_servers  # Should match your inventory group
+- name: Deploy Travel Planning App
+  hosts: web
   become: yes
   vars:
-    app_dir: /opt/travel-app
-    docker_compose_file: "{{ app_dir }}/docker-compose.yml"
-    
+    app_dir: ${APP_DIR}
+    backend_image: "hiran86/travel-planning-app-backend:{{ backend_image_tag }}"
+    frontend_image: "hiran86/travel-planning-app-frontend:{{ frontend_image_tag }}"
+  
   tasks:
-    # 1. Install system dependencies
-    - name: Install system packages
+    - name: Install Docker
       apt:
         name:
-          - apt-transport-https
-          - ca-certificates
-          - curl
-          - gnupg-agent
-          - software-properties-common
+          - docker.io
+          - docker-compose-plugin
         update_cache: yes
         state: present
       when: ansible_os_family == 'Debian'
@@ -38,16 +35,15 @@
           - docker-ce
           - docker-ce-cli
           - containerd.io
+          - docker-compose-plugin
         state: present
         update_cache: yes
 
-    # 3. Install docker-compose (official method)
-    - name: Download docker-compose
-      get_url:
-        url: https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-linux-x86_64
-        dest: /usr/local/bin/docker-compose
-        mode: '0755'
-        force: yes
+    # 3. Install Python Docker SDK
+    - name: Install Docker SDK for Python
+      pip:
+        name: docker>=6.0.0
+        executable: pip3
 
     # 4. Configure Docker permissions
     - name: Add ubuntu user to docker group
@@ -68,25 +64,45 @@
     # 6. Deploy docker-compose file
     - name: Copy docker-compose.yml
       template:
-        src: templates/docker-compose.yml.j2  # Should template your compose file
+        src: docker-compose.yml
         dest: "{{ docker_compose_file }}"
         owner: ubuntu
         group: ubuntu
         mode: '0644'
 
-    # 7. Docker Hub login
-    - name: Authenticate with Docker Hub
-      community.docker.docker_login:
-        username: "{{ docker_hub_username }}"
-        password: "{{ docker_hub_password }}"
-        email: "{{ docker_hub_email | default(omit) }}"
+    # 7. Start containers with version detection
+    - name: Start containers with Docker Compose
+      block:
+        - name: Check for Docker Compose v2
+          command: docker compose version
+          register: compose_version_check
+          changed_when: false
+          ignore_errors: yes
 
-    # 8. Pull and run containers
-    - name: Start containers
-      community.docker.docker_compose:
-        project_src: "{{ app_dir }}"
-        files:
-          - "{{ docker_compose_file }}"
-        state: present
-        pull: yes
-        restart: yes
+        - name: Start containers using v2
+          command: >
+            docker compose -f {{ docker_compose_file }} up -d
+            --pull always
+          args:
+            chdir: "{{ app_dir }}"
+          when: compose_version_check is success
+
+        - name: Start containers using v1 (fallback)
+          command: >
+            docker-compose -f {{ docker_compose_file }} up -d
+            --pull always
+          args:
+            chdir: "{{ app_dir }}"
+          when: compose_version_check is failed
+      become: yes
+      become_user: ubuntu
+
+    # 8. Verification
+    - name: Verify running containers
+      command: docker ps
+      register: running_containers
+      changed_when: false
+
+    - name: Show container status
+      debug:
+        var: running_containers.stdout_lines
