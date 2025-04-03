@@ -2,9 +2,11 @@ pipeline {
     agent any 
     
     environment {
-        // Define your EC2 host (or pass as parameter)
         EC2_HOST = 'ec2-54-208-57-6.compute-1.amazonaws.com'
+        EC2_IP = '54.208.57.6'
         APP_DIR = '/opt/travel-app'
+        SSH_TIMEOUT = '10'
+        SSH_USER = 'user' // Confirm this matches your WSL username (run: wsl whoami)
     }
     
     stages {
@@ -16,10 +18,9 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Prepare Ansible Files') {
             steps {
-                // Create inventory file
                 writeFile file: 'inventory.ini', text: """
                 [web]
                 ${EC2_HOST} ansible_user=ubuntu
@@ -28,7 +29,6 @@ pipeline {
                 ansible_python_interpreter=/usr/bin/python3
                 """
                 
-                // Create minimal deploy.yml if not in repo
                 writeFile file: 'deploy.yml', text: """
                 ---
                 - name: Deploy Travel Planning App
@@ -71,7 +71,6 @@ pipeline {
                         --pull always
                 """
                 
-                // Verify files exist
                 script {
                     if (!fileExists('docker-compose.yml')) {
                         error("Missing docker-compose.yml in repository!")
@@ -83,7 +82,7 @@ pipeline {
         stage('Build Backend Docker Image') {
             steps {  
                 dir('backend') {
-                    bat 'docker build -t hiran86/travel-planning-app-backend:%BUILD_NUMBER% .'
+                    bat "docker build -t hiran86/travel-planning-app-backend:${env.BUILD_NUMBER} ."
                 }
             }
         }
@@ -91,7 +90,7 @@ pipeline {
         stage('Build Frontend Docker Image') {
             steps {  
                 dir('frontend') {
-                    bat 'docker build -t hiran86/travel-planning-app-frontend:%BUILD_NUMBER% .'
+                    bat "docker build -t hiran86/travel-planning-app-frontend:${env.BUILD_NUMBER} ."
                 }
             }
         }
@@ -106,60 +105,99 @@ pipeline {
         
         stage('Push Images') {
             steps {
-                bat 'docker push hiran86/travel-planning-app-backend:%BUILD_NUMBER%'
-                bat 'docker push hiran86/travel-planning-app-frontend:%BUILD_NUMBER%'
+                bat "docker push hiran86/travel-planning-app-backend:${env.BUILD_NUMBER}"
+                bat "docker push hiran86/travel-planning-app-frontend:${env.BUILD_NUMBER}"
             }
         }
-        
-        stage('Deploy to EC2') {
+
+        stage('Terraform Setup') {
             steps {
-                withCredentials([sshUserPrivateKey(
-                    credentialsId: 'travel-app-key',
-                    keyFileVariable: 'SSH_KEY',
-                    usernameVariable: 'SSH_USER'
-                )]) {
-                    bat """
-                    copy "%SSH_KEY%" "%WORKSPACE%\\travel-app-key.pem"
+                script {
+                    def instanceExists = false
                     
-                    :: Verify Python exists at your specific path
-                    IF NOT EXIST "C:\\Users\\Hiran\\AppData\\Local\\Programs\\Python\\Python313\\python.exe" (
-                        echo Python not found at expected location
-                        exit /b 1
-                    )
-                    
-                    :: Verify Ansible is installed
-                    IF NOT EXIST "C:\\Users\\Hiran\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\ansible-playbook.exe" (
-                        echo Ansible not found. Installing...
-                        "C:\\Users\\Hiran\\AppData\\Local\\Programs\\Python\\Python313\\python.exe" -m pip install ansible
-                    )
-                    
-                    :: Run Ansible using full path
-                    "C:\\Users\\Hiran\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\ansible-playbook.exe" -i inventory.ini deploy.yml ^
-                    -e "backend_image_tag=%BUILD_NUMBER%" ^
-                    -e "frontend_image_tag=%BUILD_NUMBER%"
-                    """
+                    dir('terraform') {
+                        bat 'terraform init'
+
+                        def checkInstance = bat(script: 'terraform state list aws_instance.my_instance', returnStatus: true)
+
+                        if (checkInstance == 0) {
+                            echo "Instance already exists. Skipping Terraform apply."
+                            instanceExists = true
+                        } else {
+                            echo "No existing instance found. Proceeding with Terraform apply."
+                        }
+
+                        if (!instanceExists) {
+                            bat 'terraform apply -auto-approve'
+                        }
+                    }
                 }
             }
         }
+
+        stage('Prepare SSH Key') {
+            steps {
+                script {
+                    bat "wsl mkdir -p /home/%SSH_USER%/.ssh"
+                    
+                    withCredentials([sshUserPrivateKey(
+                        credentialsId: 'travel-app-key',
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_USERNAME'
+                    )]) {
+                        def keyContent = readFile(file: env.SSH_KEY_FILE)
+                        writeFile file: 'key-content.txt', text: keyContent
+                        bat 'type key-content.txt | wsl tee /home/%SSH_USER%/.ssh/travel-app-key.pem > nul'
+                        bat 'del /q key-content.txt'
+                        bat 'wsl chmod 600 /home/%SSH_USER%/.ssh/travel-app-key.pem'
+                    }
+                }
+            }
+        }
+
+        stage('Deploy Application') {
+            steps {
+                script {
+                    // 1. Prepare WSL environment
+                    bat 'wsl -d Ubuntu mkdir -p /home/%SSH_USER%/ansible'
+                    
+                    // 2. Copy deployment files
+                    bat 'wsl -d Ubuntu cp inventory.ini deploy.yml /home/%SSH_USER%/ansible/'
+                    bat 'wsl -d Ubuntu cp %WORKSPACE%\\travel-app-key.pem /home/%SSH_USER%/ansible/'
+                    bat 'wsl -d Ubuntu chmod 600 /home/%SSH_USER%/ansible/travel-app-key.pem'
+                    
+                    // 3. Run the playbook with correct syntax
+                    bat """
+                    wsl -d Ubuntu /usr/bin/ansible-playbook ^
+                    -i /home/%SSH_USER%/ansible/inventory.ini ^
+                    /home/%SSH_USER%/ansible/deploy.yml ^
+                    --private-key /home/%SSH_USER%/ansible/travel-app-key.pem ^
+                    --extra-vars "backend_image_tag=${env.BUILD_NUMBER} frontend_image_tag=${env.BUILD_NUMBER}"
+                    """
+                    
+                    // 4. Verify deployment
+                    bat 'wsl -d Ubuntu ssh -i /home/%SSH_USER%/ansible/travel-app-key.pem ubuntu@${EC2_HOST} "docker ps"'
+                }
+            }
+        }
+
 
     }
     
     post {
         always {
             bat 'docker logout'
-            // Cross-platform cleanup
             script {
-                if (isUnix()) {
-                    sh 'rm -f $WORKSPACE/travel-app-key.pem'
-                } else {
-                    bat 'if exist "%WORKSPACE%\\travel-app-key.pem" del "%WORKSPACE%\\travel-app-key.pem"'
-                }
+                bat '''
+                if exist "%WORKSPACE%\\ansible" rmdir /s /q "%WORKSPACE%\\ansible"
+                '''
+                bat "wsl rm -f /home/${SSH_USER}/.ssh/travel-app-key.pem"
             }
         }
         failure {
             archiveArtifacts artifacts: '**/*.log', allowEmptyArchive: true
-            slackSend channel: '#deployments',
-                     message: "Build ${BUILD_NUMBER} failed - ${BUILD_URL}"
+            echo "Build ${env.BUILD_NUMBER} failed - ${env.BUILD_URL}"
         }
-    }
 }
+}
+
