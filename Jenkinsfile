@@ -135,26 +135,6 @@ pipeline {
             }
         }
 
-        stage('Prepare SSH Key') {
-            steps {
-                script {
-                    bat "wsl mkdir -p /home/%SSH_USER%/.ssh"
-                    
-                    withCredentials([sshUserPrivateKey(
-                        credentialsId: 'travel-app-key',
-                        keyFileVariable: 'SSH_KEY_FILE',
-                        usernameVariable: 'SSH_USERNAME'
-                    )]) {
-                        def keyContent = readFile(file: env.SSH_KEY_FILE)
-                        writeFile file: 'key-content.txt', text: keyContent
-                        bat 'type key-content.txt | wsl tee /home/%SSH_USER%/.ssh/travel-app-key.pem > nul'
-                        bat 'del /q key-content.txt'
-                        bat 'wsl chmod 600 /home/%SSH_USER%/.ssh/travel-app-key.pem'
-                    }
-                }
-            }
-        }
-
         stage('Deploy Application') {
             steps {
                 script {
